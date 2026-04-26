@@ -1,0 +1,56 @@
+# ============================================================
+# CPED data + derived caches — DO NOT REDISTRIBUTE
+# Governed by Junyan Jiang's data-use agreement
+# ============================================================
+*.pkl
+*.xlsx
+*.xls
+Full Data.xlsx
+Location_and_Job_Codes.xlsx
+
+# Pre-rendered intermediate HTML (regenerated from .md)
+OSF_PreRegistration_v1.html
+
+# ============================================================
+# Python build artifacts
+# ============================================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual envs
+venv/
+env/
+.venv/
+.env/
+
+# ============================================================
+# OS / IDE noise
+# ============================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# ============================================================
+# Jupyter
+# ============================================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ============================================================
+# Local notes that shouldn't ship
+# ============================================================
+NOTES.md
+TODO.md
+scratch/
