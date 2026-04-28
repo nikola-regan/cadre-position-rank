@@ -85,7 +85,19 @@ RE_BOILERPLATE = re.compile(
 # (Chinese government docs often pad short names with spaces for visual
 # alignment, e.g., "高 颜" instead of "高颜". We capture the whole thing,
 # then strip whitespace.)
-RE_NAME       = re.compile(r"^([一-龥][一-龥·‧・\s]{1,10})[,，、]\s*[男女]")
+# ALSO allow optional "（曾用名：xxx）" parenthetical between name and 男/女.
+RE_NAME       = re.compile(
+    r"^([一-龥][一-龥·‧・\s]{1,10})"        # the name itself
+    r"(?:\s*[（(][^)）]*[)）])?"               # optional (曾用名：...) parenthetical
+    r"\s*[,，、]\s*[男女]"                    # comma + gender
+)
+# Numbered-list prefix: "1、", "1.", "(1)", "（一）", "1．", "1, " etc.
+# Common in batch 任前公示 documents listing multiple cadres.
+RE_NUMBER_PREFIX = re.compile(
+    r"^\s*[（(]?\s*"
+    r"(?:\d{1,3}|[一二三四五六七八九十]{1,3})"
+    r"\s*[）)、，,.．]\s*"
+)
 
 
 def _parse_yyyymm(year: str, month: str) -> str:
@@ -108,6 +120,11 @@ def parse_bio(raw_text: str,
     # Strip boilerplate intro that sometimes precedes the actual bio
     # (e.g., "为加强干部选拔任用工作的民主监督...对XXX同志进行任职前公示。 XXX,男,...")
     text = RE_BOILERPLATE.sub("", text)
+
+    # Strip numbered-list prefix when bios are batch-listed:
+    # "1、周焕祥, 男, ..."  → "周焕祥, 男, ..."
+    # "（一） 张三, 男, ..." → "张三, 男, ..."
+    text = RE_NUMBER_PREFIX.sub("", text).lstrip()
 
     # --- Name (allows middle dot + internal padding spaces) ---
     m_name = RE_NAME.match(text)
