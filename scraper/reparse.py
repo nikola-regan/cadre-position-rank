@@ -22,6 +22,7 @@ PARSED_FIELDS = [
     "party_join_date", "work_start_date",
     "highest_degree", "alma_mater",
     "current_position", "proposed_position",
+    "current_city", "party_affiliation",   # v0.4 additions
     "parser_version", "parse_warnings",
 ]
 
@@ -63,12 +64,14 @@ def coverage_report(df: pd.DataFrame, label: str = "") -> None:
     n = len(df)
     for col in ["name", "gender", "ethnicity", "birth_date",
                 "native_province", "highest_degree",
-                "current_position", "proposed_position"]:
+                "current_position", "proposed_position",
+                "current_city", "party_affiliation"]:
         if col in df.columns:
             filled = df[col].notna().sum()
             print(f"  {col:20s}  {filled:4d}/{n}  ({100*filled/n:5.1f}%)")
-    n_warn = (df["parse_warnings"].fillna("").astype(str) != "").sum()
-    print(f"  rows w/ any warning  {n_warn:4d}/{n}  ({100*n_warn/n:5.1f}%)")
+    if "parse_warnings" in df.columns:
+        n_warn = (df["parse_warnings"].fillna("").astype(str) != "").sum()
+        print(f"  rows w/ any warning  {n_warn:4d}/{n}  ({100*n_warn/n:5.1f}%)")
 
 
 def main():

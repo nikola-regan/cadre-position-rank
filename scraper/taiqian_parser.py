@@ -45,11 +45,15 @@ class CadreBio:
     current_position: Optional[str] = None    # 现任...
     proposed_position: Optional[str] = None   # 拟任...
 
+    # NEW v0.4: derived/auxiliary fields
+    current_city: Optional[str] = None        # working-location city/省 from current_position
+    party_affiliation: Optional[str] = None   # 中共党员/民盟/民革/无党派/群众/...
+
     # Provenance
     source_url: Optional[str] = None
     source_date: Optional[str] = None         # 公示日期
     raw_text: Optional[str] = None
-    parser_version: str = "v0.1"
+    parser_version: str = "v0.5"
     parse_warnings: list = field(default_factory=list)
 
 
@@ -98,6 +102,145 @@ RE_NUMBER_PREFIX = re.compile(
     r"(?:\d{1,3}|[一二三四五六七八九十]{1,3})"
     r"\s*[）)、，,.．]\s*"
 )
+
+# Working-location: pull the leading 地名 from current_position.
+# Examples:
+#   "苏州市公共交通有限公司..."        → 苏州市
+#   "省委组织部副部长"                  → 省委组织部 (省级,not a city)
+#   "民革连云港市委会..."              → 民革 (false positive, handle below)
+#   "靖江市残联副主席..."              → 靖江市
+#   "高港区政府副区长..."              → 高港区
+#   "南京市某区委书记..."              → 南京市
+# --------------------------------------------------------------------
+# Gazetteer-based location matching (replaces fragile regex)
+# --------------------------------------------------------------------
+# 31 provincial-level regions
+PROVINCES = [
+    "北京", "上海", "天津", "重庆", "河北", "山西", "内蒙古",
+    "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建",
+    "江西", "山东", "河南", "湖北", "湖南", "广东", "广西",
+    "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃",
+    "青海", "宁夏", "新疆", "香港", "澳门", "台湾",
+]
+
+# 江苏 13 prefecture-level cities (the focus of our dataset)
+JIANGSU_PREFECTURE = [
+    "南京", "苏州", "无锡", "常州", "镇江", "扬州", "泰州",
+    "南通", "盐城", "连云港", "徐州", "淮安", "宿迁",
+]
+
+# 江苏 county-level cities and districts
+JIANGSU_LOCAL = [
+    # 县级市
+    "江阴", "宜兴", "丹阳", "常熟", "张家港", "昆山", "太仓",
+    "扬中", "句容", "靖江", "泰兴", "兴化", "海安", "如皋",
+    "启东", "海门", "东台", "大丰", "阜宁",
+    "新沂", "邳州", "东海", "丰县", "沛县", "睢宁",
+    # 部分典型市辖区(用作前缀辨认)
+    "高港", "姜堰", "海陵", "宿豫", "沭阳", "泗阳", "泗洪",
+    "灌云", "灌南", "赣榆", "金湖", "盱眙", "涟水", "洪泽",
+    "建湖", "射阳", "滨海", "响水",
+    "鼓楼", "玄武", "秦淮", "建邺", "雨花台", "栖霞", "江宁",
+    "浦口", "六合", "高淳", "溧水",
+    "姑苏", "虎丘", "吴中", "相城", "吴江",
+    "梁溪", "锡山", "惠山", "滨湖", "新吴",
+    "天宁", "钟楼", "新北", "武进", "金坛", "溧阳",
+    "京口", "润州",
+    "广陵", "邗江", "江都",
+    "崇川", "通州", "海门",
+    "亭湖", "盐都",
+    "海州", "连云",
+    "鼓楼区", "云龙", "贾汪", "泉山", "铜山",
+    "清江浦", "淮阴", "淮安区",
+    "宿城", "宿豫",
+]
+
+# Build sorted gazetteer (longest first to avoid 张家 matching before 张家港)
+_GAZ_ENTRIES = []
+for name in PROVINCES:
+    _GAZ_ENTRIES.append((name, name + "省" if name not in
+                         ("北京", "上海", "天津", "重庆", "香港", "澳门",
+                          "内蒙古", "广西", "西藏", "宁夏", "新疆", "台湾")
+                         else (name + "市" if name in
+                               ("北京", "上海", "天津", "重庆") else name)))
+for name in JIANGSU_PREFECTURE:
+    _GAZ_ENTRIES.append((name, name + "市"))
+for name in JIANGSU_LOCAL:
+    # Some end in 区 already
+    if name.endswith(("区", "县")):
+        _GAZ_ENTRIES.append((name, name))
+    else:
+        # Heuristic: county-level cities take 市
+        _GAZ_ENTRIES.append((name, name + "市"))
+# Dedupe and sort by length DESC for greedy longest match
+_GAZ_ENTRIES = sorted(set(_GAZ_ENTRIES), key=lambda e: -len(e[0]))
+
+
+def lookup_location(text: str) -> Optional[str]:
+    """Greedy longest-prefix match against the gazetteer.
+    Returns canonical form (e.g., '苏州市', '江苏省') if matched at start."""
+    if not text:
+        return None
+    for prefix, canonical in _GAZ_ENTRIES:
+        if text.startswith(prefix):
+            return canonical
+    return None
+
+
+# Provincial-level prefix: position starts with 省 + ANYTHING (loose)
+RE_PROVINCIAL = re.compile(r"^省[一-龥]{1,}")
+# Central-level prefix (extended: 中国/中科院/中央/国家 etc.)
+RE_CENTRAL = re.compile(r"^(中共中央|中央|国务院|国家|全国|"
+                        r"中国|中科院|中国科学院|中国工程院|"
+                        r"外交部|国防部|"
+                        r"民政部|教育部|财政部|公安部|司法部|科技部|"
+                        r"农业农村部|商务部|文化和旅游部|生态环境部|"
+                        r"住房和城乡建设部|交通运输部|水利部|工信部)")
+# Bare 市X (no specific city name, refers to local context implicitly)
+RE_CITY_BARE = re.compile(
+    r"^市(?:委|政府|纪委|政协|人大|监委|发改|司法|公安|"
+    r"住建|规划|教育|文化|卫生|科技|民政|人社|审计|商务|"
+    r"国资|交通|水利|农业|环保|工信|应急|信访|档案|台办|"
+    r"外办|侨办|宗教|残联|总工会|妇联|团委|文联|科协|"
+    r"红十字|地震|气象|统计|审查|开发区|高新区|经开|"
+    r"老干部|离退休|发展和改革|工业和信息化|人力资源|"
+    r"自然资源|生态环境|文化广电|公共资源|"
+    r"[一-龥]{1,3}局|[一-龥]{1,3}办|[一-龥]{1,3}部|"
+    r"[一-龥]{1,3}委|[一-龥]{1,3}社|[一-龥]{1,3}台)"
+)
+# 民主党派 + 江苏省 (民进江苏省委、民革江苏省委 etc.)
+RE_PARTY_PROVINCIAL = re.compile(
+    r"^(?:民革|民盟|民建|民进|农工党|致公党|九三学社|台盟)"
+    r"([一-龥]{2,5}(?:省|市))"
+)
+# 民主党派 prefixes that look like a city but aren't
+PARTY_PREFIXES = {"民革", "民盟", "民建", "民进", "农工", "致公", "九三", "台盟"}
+
+# Legacy regex kept as fallback for unknown locations
+RE_CURRENT_CITY = re.compile(r"^([一-龥]{2,5}(?:市|区|县|州|省))")
+
+# 党派 affiliation — looks for explicit membership statement
+RE_PARTY_AFFIL = re.compile(
+    r"(中共党员|"
+    r"民革(?:党员|成员|会员)?|民盟(?:盟员|会员)?|民建(?:会员|成员)?|"
+    r"民进(?:会员|成员)?|农工党(?:党员|成员)?|致公党(?:党员|成员)?|"
+    r"九三学社(?:社员|成员)?|台盟(?:盟员|成员)?|"
+    r"无党派(?:人士|爱国人士)?|党外(?:人士)?|群众)"
+)
+# Canonicalize to short form for the column
+PARTY_CANONICAL = {
+    "中共党员": "中共党员",
+    "无党派人士": "无党派", "无党派爱国人士": "无党派", "无党派": "无党派",
+    "党外人士": "党外人士", "党外": "党外人士",
+    "群众": "群众",
+}
+# Add 8 民主党派 with all variants → canonical short name
+for stem, canonical in [("民革", "民革"), ("民盟", "民盟"), ("民建", "民建"),
+                        ("民进", "民进"), ("农工党", "农工党"), ("致公党", "致公党"),
+                        ("九三学社", "九三学社"), ("台盟", "台盟")]:
+    PARTY_CANONICAL[stem] = canonical
+    for suf in ("党员", "盟员", "会员", "社员", "成员"):
+        PARTY_CANONICAL[stem + suf] = canonical
 
 
 def _parse_yyyymm(year: str, month: str) -> str:
@@ -195,6 +338,53 @@ def parse_bio(raw_text: str,
     elif RE_PROPOSED_VAGUE.search(text):
         # "拟进一步使用" — meaningful signal even without specific role
         bio.proposed_position = "[未指定]进一步使用"
+
+    # --- v0.5: derive current_city via gazetteer + multi-stage fallback ---
+    if bio.current_position:
+        cp = bio.current_position
+        # 民主党派 + 省份 special handling: "民进江苏省委..." → 江苏省
+        m_pp = RE_PARTY_PROVINCIAL.match(cp)
+        if m_pp:
+            bio.current_city = m_pp.group(1) if m_pp.group(1).endswith("省") \
+                              else m_pp.group(1) + "省" if not m_pp.group(1).endswith(("省","市")) \
+                              else m_pp.group(1)
+        else:
+            # Strip 民主党派 prefix for gazetteer lookup
+            head2 = cp[:2]
+            cp_for_lookup = cp[2:] if head2 in PARTY_PREFIXES else cp
+
+            # 1. Gazetteer longest-prefix match
+            loc = lookup_location(cp_for_lookup)
+            if loc:
+                bio.current_city = loc
+            # 2. Central-level prefix (中国/中央/国家/...)
+            elif RE_CENTRAL.match(cp_for_lookup):
+                bio.current_city = "中央"
+            # 3. Provincial-level prefix (省委/省政府/省X厅...)
+            elif RE_PROVINCIAL.match(cp_for_lookup):
+                bio.current_city = "省级"
+            # 4. Bare 市X without specific city → 市级未指定
+            elif RE_CITY_BARE.match(cp_for_lookup):
+                bio.current_city = "市级未指定"
+            # 5. Last-resort fallback: legacy regex
+            else:
+                m = RE_CURRENT_CITY.match(cp_for_lookup)
+                if m:
+                    bio.current_city = m.group(1)
+
+    # --- v0.4: party affiliation ---
+    # Search the whole raw_text (not the boilerplate-stripped one) so we
+    # don't miss cases where membership is mentioned anywhere in the bio.
+    raw_for_party = re.sub(r"\s+", " ", raw_text or "").strip()
+    m = RE_PARTY_AFFIL.search(raw_for_party)
+    if m:
+        token = m.group(1)
+        bio.party_affiliation = PARTY_CANONICAL.get(token, token)
+    else:
+        # If raw_text mentions 中共党员 implicitly missing, default to None
+        # (don't guess); but if explicitly says 群众 elsewhere, capture
+        if "群众" in raw_for_party and "群众" not in (bio.current_position or ""):
+            bio.party_affiliation = "群众"
 
     # --- Sanity checks → warnings ---
     if not bio.name:
