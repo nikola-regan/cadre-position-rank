@@ -11,6 +11,12 @@ Location_and_Job_Codes.xlsx
 # Pre-rendered intermediate HTML (regenerated from .md)
 OSF_PreRegistration_v1.html
 
+# Scraper outputs (generated, not source)
+scraper/cache/
+scraper/demo_output.csv
+scraper/*.csv
+!scraper/sample_output.csv
+
 # ============================================================
 # Python build artifacts
 # ============================================================
